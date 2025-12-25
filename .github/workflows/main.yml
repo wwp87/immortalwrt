@@ -36,7 +36,8 @@ jobs:
         make -j$(nproc)
 
     - name: Upload firmware
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: MT3000-firmware
-        path: bin/targets/mediatek/filogic/
+       name: MT3000-firmware
+       path: bin/targets/mediatek/filogic/
+
