@@ -11,19 +11,17 @@ jobs:
     - name: Checkout source code
       uses: actions/checkout@v3
 
-    # 释放磁盘空间（非常关键）
-    - name: Free disk space
+    # 清理磁盘空间 + 挂载扩展空间
+    - name: Free disk space and mount /mnt
       run: |
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /usr/local/lib/android
         sudo rm -rf /opt/ghc
         sudo rm -rf /opt/hostedtoolcache/CodeQL
         sudo docker image prune -a -f
+        mkdir -p /mnt/openwrt
+        sudo mount --bind /mnt/openwrt $GITHUB_WORKSPACE
         df -h
-
-    # 挂载额外空间
-    - name: Setup temp space
-      uses: actions/setup-temp-space@v1
 
     # 安装依赖
     - name: Install dependencies
@@ -47,7 +45,7 @@ jobs:
         path: ~/.ccache
         key: ${{ runner.os }}-ccache-${{ hashFiles('.config') }}
 
-    # 加载自定义 .config
+    # 加载自定义配置
     - name: Load custom .config
       run: |
         cp .config .config.backup
@@ -63,7 +61,7 @@ jobs:
       run: |
         make defconfig
 
-    # 编译固件
+    # 编译固件（失败时自动降级为单线程）
     - name: Build firmware
       env:
         CCACHE_DIR: ~/.ccache
