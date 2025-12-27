@@ -11,10 +11,8 @@ jobs:
     - name: Checkout source code
       uses: actions/checkout@v3
 
-    # 清理磁盘空间（非常关键）
     - name: Free disk space
       run: |
-        echo "清理不必要的 SDK..."
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /usr/local/lib/android
         sudo rm -rf /opt/ghc
@@ -22,7 +20,6 @@ jobs:
         sudo docker image prune -a -f
         df -h
 
-    # 安装依赖
     - name: Install dependencies
       run: |
         sudo apt update
@@ -30,44 +27,38 @@ jobs:
         gettext git libncurses5-dev libssl-dev rsync unzip zlib1g-dev file wget \
         python3 python3-pip ccache
 
-    # 缓存 dl
     - name: Cache dl
       uses: actions/cache@v3
       with:
         path: dl
         key: ${{ runner.os }}-dl-${{ hashFiles('feeds.conf.default') }}
 
-    # 缓存 ccache
     - name: Cache ccache
       uses: actions/cache@v3
       with:
         path: ~/.ccache
         key: ${{ runner.os }}-ccache-${{ hashFiles('.config') }}
 
-    # 加载自定义 .config
+    # 关键：把你的 .config 覆盖到 OpenWrt 根目录
     - name: Load custom .config
       run: |
-        cp .config .config.backup
+        cp .config ./.config
 
-    # 更新 feeds
     - name: Update feeds
       run: |
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    # 生成最终配置
     - name: Make defconfig
       run: |
         make defconfig
 
-    # 编译固件（失败时自动降级为单线程）
     - name: Build firmware
       env:
         CCACHE_DIR: ~/.ccache
       run: |
         make -j$(nproc) || make -j1 V=s
 
-    # 上传固件
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
