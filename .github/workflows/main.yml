@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout source code
+    - name: Checkout workflow repo
       uses: actions/checkout@v3
 
     - name: Free disk space
@@ -27,10 +27,14 @@ jobs:
         gettext git libncurses5-dev libssl-dev rsync unzip zlib1g-dev file wget \
         python3 python3-pip ccache
 
+    - name: Clone ImmortalWrt source
+      run: |
+        git clone https://github.com/immortalwrt/immortalwrt -b master immortalwrt
+
     - name: Cache dl
       uses: actions/cache@v3
       with:
-        path: dl
+        path: immortalwrt/dl
         key: ${{ runner.os }}-dl-${{ hashFiles('feeds.conf.default') }}
 
     - name: Cache ccache
@@ -39,49 +43,45 @@ jobs:
         path: ~/.ccache
         key: ${{ runner.os }}-ccache-${{ hashFiles('.config') }}
 
-    # 自动识别 .config 路径
-    - name: Load custom .config (auto path detection)
+    - name: Load custom .config
       run: |
-        echo "检测 .config 所在路径..."
+        echo "检测 .config ..."
         if [ -f .config ]; then
           echo "使用根目录下的 .config"
-          cp .config ./.config
-        elif [ -f config ]; then
-          echo "使用根目录下的 config"
-          cp config ./.config
-        elif [ -f openwrt/.config ]; then
-          echo "openwrt/.config 已存在，无需复制"
+          cp .config immortalwrt/.config
         else
-          echo "未找到 .config，跳过复制"
+          echo "未找到 .config，使用默认配置"
         fi
 
     - name: Update feeds
       run: |
+        cd immortalwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     - name: Make defconfig
       run: |
+        cd immortalwrt
         make defconfig
 
     - name: Build firmware
       env:
         CCACHE_DIR: ~/.ccache
       run: |
+        cd immortalwrt
         make -j$(nproc) || make -j1 V=s
 
     - name: Upload firmware to artifact
       uses: actions/upload-artifact@v4
       with:
         name: MT3000-firmware
-        path: bin/targets/mediatek/filogic/
+        path: immortalwrt/bin/targets/mediatek/filogic/
 
     - name: Upload firmware to GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         name: "MT3000 Build ${{ github.run_number }}"
         tag_name: "mt3000-${{ github.run_number }}"
-        files: |
-          bin/targets/mediatek/filogic/*.bin
+        files: immortalwrt/bin/targets/mediatek/filogic/**/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
