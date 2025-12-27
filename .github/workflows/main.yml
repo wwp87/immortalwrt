@@ -39,20 +39,21 @@ jobs:
         path: ~/.ccache
         key: ${{ runner.os }}-ccache-${{ hashFiles('.config') }}
 
-   - name: Load custom .config (auto path detection)
-     run: |
-       echo "检测 .config 所在路径..."
-       if [ -f .config ]; then
-         echo "使用根目录下的 .config"
-         cp .config ./.config
-       elif [ -f config ]; then
-         echo "使用根目录下的 config"
-         cp config ./.config
-       elif [ -f immortalwrt/.config ]; then
-         echo "已存在目标 .config，无需复制"
-       else
-         echo "未找到 .config，跳过复制"
-       fi
+    # 自动识别 .config 路径
+    - name: Load custom .config (auto path detection)
+      run: |
+        echo "检测 .config 所在路径..."
+        if [ -f .config ]; then
+          echo "使用根目录下的 .config"
+          cp .config ./.config
+        elif [ -f config ]; then
+          echo "使用根目录下的 config"
+          cp config ./.config
+        elif [ -f openwrt/.config ]; then
+          echo "openwrt/.config 已存在，无需复制"
+        else
+          echo "未找到 .config，跳过复制"
+        fi
 
     - name: Update feeds
       run: |
