@@ -39,7 +39,6 @@ jobs:
         path: ~/.ccache
         key: ${{ runner.os }}-ccache-${{ hashFiles('.config') }}
 
-    # 关键：把你的 .config 覆盖到 OpenWrt 根目录
     - name: Load custom .config
       run: |
         cp .config ./.config
@@ -59,8 +58,18 @@ jobs:
       run: |
         make -j$(nproc) || make -j1 V=s
 
-    - name: Upload firmware
+    - name: Upload firmware to artifact
       uses: actions/upload-artifact@v4
       with:
         name: MT3000-firmware
         path: bin/targets/mediatek/filogic/
+
+    - name: Upload firmware to GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: "MT3000 Build ${{ github.run_number }}"
+        tag_name: "mt3000-${{ github.run_number }}"
+        files: |
+          bin/targets/mediatek/filogic/*.bin
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
