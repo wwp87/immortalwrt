@@ -1,0 +1,41 @@
+name: Build GL-MT3000 Minimal
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: 安装依赖
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential git python3 rsync unzip \
+            libncurses5-dev zlib1g-dev gawk flex gettext libssl-dev wget
+
+      - name: 克隆 ImmortalWrt
+        run: |
+          git clone https://github.com/immortalwrt/immortalwrt.git
+          cd immortalwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 应用配置
+        run: |
+          cd immortalwrt
+          cp $GITHUB_WORKSPACE/.config .config
+          yes "" | make defconfig
+
+      - name: 编译固件
+        run: |
+          cd immortalwrt
+          make -j$(nproc) V=s
+          mkdir -p $GITHUB_WORKSPACE/artifacts
+          cp -r bin/targets/*/* $GITHUB_WORKSPACE/artifacts/
+
+      - name: 上传固件
+        uses: actions/upload-artifact@v4
+        with:
+          name: gl-mt3000-minimal
+          path: artifacts
