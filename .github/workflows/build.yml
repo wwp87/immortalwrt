@@ -1,4 +1,4 @@
-name: Build GL-MT3000 Minimal
+name: Build GL-MT3000 Minimal Fast
 
 on:
   workflow_dispatch:
@@ -10,11 +10,8 @@ jobs:
     steps:
       - name: 清理磁盘空间（释放 20GB+）
         run: |
-          sudo rm -rf /opt/hostedtoolcache
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /home/runner/work/_temp
-          sudo rm -rf /home/runner/work/_actions
+          sudo rm -rf /opt/hostedtoolcache /usr/local/lib/android /usr/share/dotnet
+          sudo rm -rf /home/runner/work/_temp /home/runner/work/_actions
           df -h
 
       - name: 安装依赖
@@ -30,7 +27,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 写入配置（不依赖外部 .config）
+      - name: 写入配置（精简 + 加速）
         run: |
           cd immortalwrt
           cat > .config <<'EOF'
@@ -48,19 +45,19 @@ jobs:
           CONFIG_PACKAGE_hostapd-common=y
           CONFIG_PACKAGE_wpad-basic-mbedtls=y
           CONFIG_PACKAGE_igmpproxy=y
-          CONFIG_PACKAGE_smcroute=y
-          CONFIG_PACKAGE_udpxy=y
           CONFIG_PACKAGE_luci-app-openclash=y
-          CONFIG_PACKAGE_tcpdump=y
-          CONFIG_PACKAGE_htop=y
-          CONFIG_PACKAGE_curl=y
           EOF
           yes "" | make defconfig
 
-      - name: 编译固件（串行 + 显示详细日志）
+      - name: 预下载所有依赖包（加速编译）
         run: |
           cd immortalwrt
-          make -j1 V=s
+          make download -j8
+
+      - name: 编译固件（并行 + 自动重试）
+        run: |
+          cd immortalwrt
+          make -j$(nproc) || make -j1 V=s
           mkdir -p $GITHUB_WORKSPACE/artifacts
           cp -r bin/targets/*/* $GITHUB_WORKSPACE/artifacts/
 
