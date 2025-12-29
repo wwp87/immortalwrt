@@ -5,9 +5,15 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
+      - name: 清理磁盘空间
+        run: |
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /home/runner/work/_temp
+          sudo rm -rf /home/runner/work/_actions
+
       - name: 安装依赖
         run: |
           sudo apt update
@@ -51,7 +57,7 @@ jobs:
       - name: 编译固件
         run: |
           cd immortalwrt
-          make -j$(nproc) V=s
+          make -j$(nproc)
           mkdir -p $GITHUB_WORKSPACE/artifacts
           cp -r bin/targets/*/* $GITHUB_WORKSPACE/artifacts/
 
