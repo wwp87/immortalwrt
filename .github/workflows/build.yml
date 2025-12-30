@@ -10,25 +10,31 @@ jobs:
     steps:
       - name: 清理磁盘空间
         run: |
+          echo "清理磁盘空间..."
           sudo rm -rf /opt/hostedtoolcache /usr/local/lib/android /usr/share/dotnet
           sudo rm -rf /home/runner/work/_temp /home/runner/work/_actions
           df -h
 
       - name: 安装依赖
         run: |
+          echo "安装构建依赖..."
           sudo apt update
           sudo apt install -y build-essential git python3 rsync unzip \
             libncurses5-dev zlib1g-dev gawk flex gettext libssl-dev wget
+          df -h  # 再次查看磁盘空间，确保有足够空间
 
       - name: 克隆 ImmortalWrt
         run: |
+          echo "克隆 ImmortalWrt 仓库..."
           git clone https://github.com/immortalwrt/immortalwrt.git
           cd immortalwrt
+          git checkout master  # 如果需要特定分支，可以在此修改
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: 写入配置
         run: |
+          echo "写入配置文件..."
           cd immortalwrt
           cat > .config <<'EOF'
           CONFIG_TARGET_mediatek=y
@@ -50,13 +56,15 @@ jobs:
 
       - name: 预下载依赖
         run: |
+          echo "预下载依赖..."
           cd immortalwrt
           make download -j8
 
       - name: 编译固件
         run: |
+          echo "开始编译固件..."
           cd immortalwrt
-          make -j$(nproc) || make -j1 V=s
+          make -j$(nproc) || make -j1 V=s  # 若多核编译失败，使用单核编译
           mkdir -p $GITHUB_WORKSPACE/artifacts
           cp -r bin/targets/*/* $GITHUB_WORKSPACE/artifacts/
 
@@ -65,3 +73,8 @@ jobs:
         with:
           name: gl-mt3000-minimal
           path: artifacts
+
+      - name: 清理缓存
+        run: |
+          echo "清理缓存..."
+          sudo rm -rf $GITHUB_WORKSPACE/immortalwrt
