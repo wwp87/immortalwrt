@@ -39,7 +39,7 @@ jobs:
           CONFIG_PACKAGE_ip-full=y
           CONFIG_PACKAGE_dnsmasq-full=y
           CONFIG_PACKAGE_ca-bundle=y
-          CONFIG_PACKAGE_ca-certificates=y
+          # CONFIG_PACKAGE_ca-certificates is not set
           CONFIG_PACKAGE_kmod-mt7981-firmware=y
           CONFIG_PACKAGE_kmod-mt7915e=y
           CONFIG_PACKAGE_hostapd-common=y
@@ -48,6 +48,15 @@ jobs:
           CONFIG_PACKAGE_luci-app-openclash=y
           EOF
           yes "" | make defconfig
+
+      - name: 冲突检测与修复（可选）
+        run: |
+          cd immortalwrt
+          if grep -q "CONFIG_PACKAGE_ca-bundle=y" .config && grep -q "CONFIG_PACKAGE_ca-certificates=y" .config; then
+            echo "检测到 ca-bundle 与 ca-certificates 冲突，自动禁用 ca-certificates"
+            sed -i 's/CONFIG_PACKAGE_ca-certificates=y/# CONFIG_PACKAGE_ca-certificates is not set/' .config
+            yes "" | make defconfig
+          fi
 
       - name: 预下载所有依赖包（加速编译）
         run: |
