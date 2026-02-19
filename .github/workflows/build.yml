@@ -7,7 +7,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # 赋予发布 Releases 的权限
+      contents: write  # 赋予发布Releases权限
 
     steps:
     - name: Checkout source
@@ -17,96 +17,81 @@ jobs:
 
     - name: Setup build environment
       run: |
-        sudo apt update -y
-        sudo apt full-upgrade -y
-        # 安装 ImmortalWrt 编译完整依赖（避免隐性失败）
+        sudo apt update -y && sudo apt full-upgrade -y
+        # 安装完整编译依赖
         sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib \
           gettext git libncurses5-dev libssl-dev python3 python3-setuptools \
           rsync unzip zlib1g-dev file wget curl swig libelf-dev \
           libglib2.0-dev libfuse3-dev pkg-config
 
-    - name: Add third-party feeds (去重 + 镜像加速)
+    - name: Add third-party feeds (去重+镜像加速)
       run: |
-        # 备份原始 feeds 配置
+        # 备份原始配置
         cp feeds.conf.default feeds.conf.default.bak
         
-        # 1. 添加 passwall 源（去重逻辑，避免重复定义）
-        if ! grep -qE "^src-git passwall" feeds.conf.default; then
-          # 使用镜像加速拉取 passwall（解决 GitHub 拉取超时）
-          echo "src-git passwall https://mirror.ghproxy.com/https://github.com/xiaorouji/openwrt-passwall.git" >> feeds.conf.default
-          echo "✅ Added passwall feed (mirror)"
-        else
-          echo "ℹ️ passwall feed already exists, skip"
-        fi
+        # 1. 清理重复的passwall定义（核心兜底）
+        sed -i '/^src-git passwall/d' feeds.conf.default
         
-        # 2. 添加 rtp2httpd 源（请替换为正确的源地址，否则会提示目录缺失）
-        if ! grep -qE "^src-git rtp2httpd" feeds.conf.default; then
-          # 请将下方链接替换为真实的 rtp2httpd 源地址，否则注释掉这行
-          # echo "src-git rtp2httpd https://mirror.ghproxy.com/https://github.com/xxx/rtp2httpd.git" >> feeds.conf.default
-          echo "ℹ️ rtp2httpd feed not added (please set correct source URL)"
-        else
-          echo "ℹ️ rtp2httpd feed already exists"
-        fi
+        # 2. 添加passwall源（镜像加速）
+        echo "src-git passwall https://mirror.ghproxy.com/https://github.com/xiaorouji/openwrt-passwall.git" >> feeds.conf.default
         
-        # 3. 全局镜像加速 OpenWrt 官方 feeds
+        # 3. 如需rtp2httpd，替换为真实地址（无则注释）
+        # sed -i '/^src-git rtp2httpd/d' feeds.conf.default
+        # echo "src-git rtp2httpd https://mirror.ghproxy.com/https://github.com/xxx/rtp2httpd.git" >> feeds.conf.default
+        
+        # 4. 全局镜像加速官方feeds
         sed -i 's#https://git.openwrt.org#https://mirror.ghproxy.com/https://git.openwrt.org#g' feeds.conf.default
         
-        # 打印最终 feeds 配置（便于日志排查）
+        # 打印最终配置
         echo "=== Final feeds.conf.default ==="
         cat feeds.conf.default
 
-    - name: Update and install feeds (强制修复目录缺失)
+    - name: Update and install feeds (强制+手动克隆兜底)
       run: |
-        # 1. 强制清理所有旧 feeds 缓存和目录（核心修复）
+        # 1. 强制清理旧feeds
         ./scripts/feeds clean -a
-        rm -rf ./feeds/*  # 清空旧 feeds 目录
-        mkdir -p ./feeds  # 重建 feeds 目录
+        rm -rf ./feeds/* && mkdir -p ./feeds
         
-        # 2. 强制更新所有 feeds（-f 强制刷新，避免缓存）
-        ./scripts/feeds update -a -f
+        # 2. 强制更新feeds
+        ./scripts/feeds update -a -f || {
+          echo "⚠️ feeds update失败，尝试手动克隆核心feeds"
+          # 手动克隆passwall到feeds目录（兜底方案）
+          git clone --depth=1 https://mirror.ghproxy.com/https://github.com/xiaorouji/openwrt-passwall.git ./feeds/passwall
+          # 手动克隆rtp2httpd（替换为真实地址）
+          # git clone --depth=1 https://mirror.ghproxy.com/https://github.com/xxx/rtp2httpd.git ./feeds/rtp2httpd
+        }
         
-        # 3. 强制安装所有 feeds（-f 强制覆盖安装）
+        # 3. 强制安装feeds
         ./scripts/feeds install -a -f
         
-        # 4. 单独安装 passwall（确保优先级）
-        ./scripts/feeds install passwall || {
-          echo "❌ passwall install failed! Check source URL"
-          exit 1  # 可选：如果 passwall 是必须的，安装失败则终止
-        }
+        # 4. 手动确认passwall安装
+        ./scripts/feeds install passwall || true
         
-        # 5. 尝试安装 rtp2httpd（非必须则注释 exit 1）
-        ./scripts/feeds install rtp2httpd || {
-          echo "⚠️ rtp2httpd install failed (ignore if not needed)"
-          # exit 1  # 如需强制安装，取消注释
-        }
+        # 5. 终极验证目录（不存在则手动创建+克隆）
+        echo "=== 终极目录验证 ==="
+        if [ ! -d "./feeds/passwall" ]; then
+          echo "❌ passwall目录缺失，手动克隆..."
+          git clone --depth=1 https://github.com/xiaorouji/openwrt-passwall.git ./feeds/passwall
+          if [ $? -ne 0 ]; then
+            echo "❌ 手动克隆passwall失败，请检查网络/源地址"
+            exit 1
+          fi
+        else
+          echo "✅ passwall目录存在"
+        fi
         
-        # 6. 详细验证目录是否存在（关键排查步骤）
-        echo "=== Feeds directory check ==="
+        # rtp2httpd验证（无则注释）
+        # if [ ! -d "./feeds/rtp2httpd" ]; then
+        #   echo "❌ rtp2httpd目录缺失，手动克隆..."
+        #   git clone --depth=1 https://github.com/xxx/rtp2httpd.git ./feeds/rtp2httpd
+        # fi
+        
+        # 打印最终feeds目录结构
         ls -la ./feeds/
-        echo "=== passwall directory check ==="
-        if [ -d "./feeds/passwall" ]; then
-          echo "✅ passwall directory exists"
-          ls -la ./feeds/passwall | head -10
-        else
-          echo "❌ passwall directory NOT found!"
-          exit 1
-        fi
-        echo "=== rtp2httpd directory check ==="
-        if [ -d "./feeds/rtp2httpd" ]; then
-          echo "✅ rtp2httpd directory exists"
-        else
-          echo "⚠️ rtp2httpd directory NOT found (ignore if not needed)"
-        fi
 
     - name: Load custom config
       run: |
-        # 检查自定义配置文件，无则生成默认配置
-        if [ -f .config ]; then
-          echo "ℹ️ Using existing .config"
-          cp .config .config.bak
-        else
-          echo "ℹ️ No .config found, generate default config"
-        fi
+        [ -f .config ] && cp .config .config.bak || echo "生成默认配置"
         make defconfig
 
     - name: Cache build files
@@ -123,18 +108,15 @@ jobs:
 
     - name: Compile firmware
       run: |
-        # 先多线程编译，失败则单线程输出详细日志（便于排查编译错误）
-        make -j$(nproc) || {
-          echo "❌ Multi-thread build failed, retry with single thread"
-          make -j1 V=s
-        }
+        # 多线程失败则单线程输出详细日志
+        make -j$(nproc) || make -j1 V=s
 
     - name: Upload firmware to artifact
       uses: actions/upload-artifact@v4
       with:
         name: MT3000-firmware-${{ github.run_number }}
         path: bin/targets/**
-        retention-days: 7  # 产物保留7天
+        retention-days: 7
 
     - name: Upload to Releases
       uses: softprops/action-gh-release@v2
