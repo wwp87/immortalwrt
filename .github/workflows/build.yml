@@ -19,7 +19,8 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib \
-        gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev
+        gettext git libncurses5-dev libssl-dev python3-setuptools python3-pip \
+        rsync unzip zlib1g-dev
 
     - name: Update Feeds
       run: |
