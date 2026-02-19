@@ -1,56 +1,142 @@
-- name: Add third-party feeds (移除失效镜像)
-  run: |
-    # 备份原始配置
-    cp feeds.conf.default feeds.conf.default.bak
-    
-    # 1. 清理所有 passwall 定义
-    sed -i '/^src-git passwall/d' feeds.conf.default
-    # 2. 添加 passwall 源（直接使用 GitHub 原始地址）
-    echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall.git" >> feeds.conf.default
-    
-    # 3. 清理所有 rtp2httpd 定义（无则跳过）
-    sed -i '/^src-git rtp2httpd/d' feeds.conf.default
-    # 4. 添加 rtp2httpd 源（替换为真实地址，无则注释）
-    # echo "src-git rtp2httpd https://github.com/xxx/rtp2httpd.git" >> feeds.conf.default
-    
-    # 5. 移除官方 feeds 的镜像（直接使用原始地址）
-    sed -i 's#https://mirror.ghproxy.com/https://git.openwrt.org#https://git.openwrt.org#g' feeds.conf.default
-    
-    # 打印最终配置
-    echo "=== Final feeds.conf.default ==="
-    cat feeds.conf.default
+name: Build ImmortalWrt MT3000
 
-- name: Update and install feeds (使用 GitHub 原始地址)
-  run: |
-    # 1. 强制清理旧 feeds
-    ./scripts/feeds clean -a
-    rm -rf ./feeds/* && mkdir -p ./feeds
-    
-    # 2. 尝试更新 feeds（使用 GitHub 原始地址）
-    ./scripts/feeds update -a -f || {
-      echo "⚠️ feeds update 失败，尝试手动克隆核心 feeds"
-      # 手动克隆 passwall（使用 GitHub 原始地址）
-      git clone --depth=1 https://github.com/xiaorouji/openwrt-passwall.git ./feeds/passwall || {
-        echo "❌ 手动克隆 passwall 失败，尝试使用 fastgit 镜像"
-        # 备用镜像：fastgit
-        git clone --depth=1 https://hub.fastgit.xyz/xiaorouji/openwrt-passwall.git ./feeds/passwall || {
-          echo "❌ 所有镜像均失败，请检查网络"
-          exit 1
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 赋予Releases发布权限
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup build environment
+      run: |
+        sudo apt update -y && sudo apt full-upgrade -y
+        # 安装完整编译依赖（避免隐性失败）
+        sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib \
+          gettext git libncurses5-dev libssl-dev python3 python3-setuptools \
+          rsync unzip zlib1g-dev file wget curl swig libelf-dev \
+          libglib2.0-dev libfuse3-dev pkg-config
+
+    - name: Add third-party feeds (移除失效镜像，用原生地址)
+      run: |
+        # 备份原始配置
+        cp feeds.conf.default feeds.conf.default.bak
+        
+        # 1. 彻底清理所有passwall/rtp2httpd重复定义
+        sed -i '/^src-git passwall/d' feeds.conf.default
+        sed -i '/^src-git rtp2httpd/d' feeds.conf.default
+        
+        # 2. 添加passwall源（GitHub原生地址，无镜像）
+        echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall.git" >> feeds.conf.default
+        
+        # 3. 添加rtp2httpd源（替换为真实地址，无则注释整段）
+        # echo "src-git rtp2httpd https://github.com/xxx/rtp2httpd.git" >> feeds.conf.default
+        
+        # 4. 恢复官方feeds原生地址（移除所有镜像）
+        sed -i 's#https://mirror.ghproxy.com/https://git.openwrt.org#https://git.openwrt.org#g' feeds.conf.default
+        
+        # 打印最终配置（便于日志排查）
+        echo "=== Final feeds.conf.default ==="
+        cat feeds.conf.default
+
+    - name: Update and install feeds (GitHub原生+fastgit备用)
+      run: |
+        # 1. 强制清理旧feeds缓存和目录
+        ./scripts/feeds clean -a
+        rm -rf ./feeds/* && mkdir -p ./feeds
+        
+        # 2. 优先用原生地址更新feeds
+        ./scripts/feeds update -a -f || {
+          echo "⚠️ 原生地址更新失败，尝试手动克隆passwall"
+          # 方案1：GitHub原生地址克隆
+          git clone --depth=1 https://github.com/xiaorouji/openwrt-passwall.git ./feeds/passwall || {
+            echo "⚠️ 原生地址克隆失败，尝试fastgit镜像"
+            # 方案2：fastgit备用镜像（GitHub加速）
+            git clone --depth=1 https://hub.fastgit.xyz/xiaorouji/openwrt-passwall.git ./feeds/passwall || {
+              echo "❌ 所有地址均克隆失败，构建终止"
+              exit 1
+            }
+          }
         }
-      }
-      # 手动克隆 rtp2httpd（替换为真实地址，无则注释）
-      # git clone --depth=1 https://github.com/xxx/rtp2httpd.git ./feeds/rtp2httpd
-    }
-    
-    # 3. 强制安装 feeds
-    ./scripts/feeds install -a -f
-    
-    # 4. 终极验证目录
-    echo "=== 终极目录验证 ==="
-    if [ ! -d "./feeds/passwall" ]; then
-      echo "❌ passwall 目录缺失，构建终止"
-      exit 1
-    else
-      echo "✅ passwall 目录存在"
-      ls -la ./feeds/passwall | head -10
-    fi
+        
+        # 3. 强制安装所有feeds
+        ./scripts/feeds install -a -f
+        
+        # 4. 单独确认passwall安装
+        ./scripts/feeds install passwall || true
+        
+        # 5. 终极目录验证（必须存在才继续）
+        echo "=== 终极目录验证 ==="
+        if [ ! -d "./feeds/passwall" ]; then
+          echo "❌ passwall目录缺失，构建终止"
+          exit 1
+        else
+          echo "✅ passwall目录存在"
+          # 打印目录内容，确认克隆成功
+          ls -la ./feeds/passwall | head -10
+        fi
+        
+        # rtp2httpd验证（无则注释）
+        # if [ ! -d "./feeds/rtp2httpd" ]; then
+        #   echo "⚠️ rtp2httpd目录缺失，尝试克隆"
+        #   git clone --depth=1 https://github.com/xxx/rtp2httpd.git ./feeds/rtp2httpd || echo "❌ rtp2httpd克隆失败"
+        # fi
+        
+        # 打印最终feeds目录结构
+        echo "=== Feeds目录结构 ==="
+        ls -la ./feeds/
+
+    - name: Load custom config
+      run: |
+        # 检查自定义配置，无则生成默认
+        if [ -f .config ]; then
+          cp .config .config.bak
+          echo "ℹ️ 使用已有.config配置"
+        else
+          echo "ℹ️ 生成默认配置"
+        fi
+        make defconfig
+
+    - name: Cache build files
+      uses: actions/cache@v4
+      with:
+        path: |
+          build_dir
+          staging_dir
+          dl
+          feeds
+        key: ${{ runner.os }}-immortalwrt-mt3000-${{ hashFiles('**/.config') }}
+        restore-keys: |
+          ${{ runner.os }}-immortalwrt-mt3000-
+
+    - name: Compile firmware
+      run: |
+        # 多线程编译失败则单线程输出详细日志（便于排查）
+        make -j$(nproc) || {
+          echo "❌ 多线程编译失败，单线程重试并输出详细日志"
+          make -j1 V=s
+        }
+
+    - name: Upload firmware to artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MT3000-firmware-${{ github.run_number }}
+        path: bin/targets/**
+        retention-days: 7  # 产物保留7天，避免占用空间
+
+    - name: Upload to Releases
+      uses: softprops/action-gh-release@v2
+      if: github.event_name == 'workflow_dispatch'
+      with:
+        tag_name: MT3000-Build-${{ github.run_number }}
+        name: ImmortalWrt MT3000 Build ${{ github.run_number }}
+        files: bin/targets/**/*
+        draft: false
+        prerelease: false
