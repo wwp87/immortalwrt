@@ -2,41 +2,62 @@ name: Build ImmortalWrt MT3000
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout source
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-    - name: Install Dependencies
+    - name: Setup build environment
       run: |
         sudo apt update
         sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib \
-        gettext git libncurses5-dev libssl-dev python3-setuptools python3-pip \
-        rsync unzip zlib1g-dev
+          gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev
 
-    - name: Update Feeds
+    - name: Clean old feeds
+      run: rm -rf feeds/*
+
+    - name: Update feeds
       run: |
+        ./scripts/feeds clean
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load Config
+    - name: Load custom config
       run: |
-        cp .config .config.orig
+        [ -f .config ] && echo "Using existing .config" || echo "No .config found"
+        make defconfig
 
-    - name: Build
+    - name: Cache build
+      uses: actions/cache@v4
+      with:
+        path: |
+          build_dir
+          staging_dir
+          dl
+        key: ${{ runner.os }}-immortalwrt-${{ hashFiles('**/.config') }}
+        restore-keys: |
+          ${{ runner.os }}-immortalwrt-
+
+    - name: Compile firmware
       run: |
         make -j$(nproc) || make -j1 V=s
 
-    - name: Upload Firmware
+    - name: Upload firmware to artifact
       uses: actions/upload-artifact@v4
       with:
         name: MT3000-firmware
-        path: bin/targets/
+        path: bin/targets/**
+
+    - name: Upload to Releases
+      uses: softprops/action-gh-release@v2
+      if: github.event_name == 'workflow_dispatch'
+      with:
+        tag_name: MT3000-${{ github.run_number }}
+        name: MT3000 Build ${{ github.run_number }}
+        files: bin/targets/**/*
