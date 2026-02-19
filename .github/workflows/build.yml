@@ -1,0 +1,41 @@
+name: Build ImmortalWrt MT3000
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Install Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib \
+        gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev
+
+    - name: Update Feeds
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Load Config
+      run: |
+        cp .config .config.orig
+
+    - name: Build
+      run: |
+        make -j$(nproc) || make -j1 V=s
+
+    - name: Upload Firmware
+      uses: actions/upload-artifact@v3
+      with:
+        name: MT3000-firmware
+        path: bin/targets/
