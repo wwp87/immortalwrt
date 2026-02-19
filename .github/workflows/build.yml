@@ -18,84 +18,94 @@ jobs:
     - name: Setup build environment
       run: |
         sudo apt update -y && sudo apt full-upgrade -y
-        # 安装完整编译依赖（避免隐性失败）
+        # 安装完整编译依赖 + wget（用于下载压缩包）
         sudo apt install -y build-essential clang flex bison g++ gawk gcc-multilib \
           gettext git libncurses5-dev libssl-dev python3 python3-setuptools \
           rsync unzip zlib1g-dev file wget curl swig libelf-dev \
           libglib2.0-dev libfuse3-dev pkg-config
 
-    - name: Add third-party feeds (移除失效镜像，用原生地址)
+    - name: Add third-party feeds (仅配置，不依赖Git拉取)
       run: |
         # 备份原始配置
         cp feeds.conf.default feeds.conf.default.bak
         
-        # 1. 彻底清理所有passwall/rtp2httpd重复定义
+        # 1. 彻底清理重复定义
         sed -i '/^src-git passwall/d' feeds.conf.default
         sed -i '/^src-git rtp2httpd/d' feeds.conf.default
         
-        # 2. 添加passwall源（GitHub原生地址，无镜像）
-        echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall.git" >> feeds.conf.default
+        # 2. 添加passwall源（仅标记，实际通过下载解压）
+        echo "src-link passwall ./feeds/passwall" >> feeds.conf.default
         
-        # 3. 添加rtp2httpd源（替换为真实地址，无则注释整段）
-        # echo "src-git rtp2httpd https://github.com/xxx/rtp2httpd.git" >> feeds.conf.default
+        # 3. rtp2httpd（无则注释）
+        # echo "src-link rtp2httpd ./feeds/rtp2httpd" >> feeds.conf.default
         
-        # 4. 恢复官方feeds原生地址（移除所有镜像）
+        # 4. 恢复官方feeds原生地址
         sed -i 's#https://mirror.ghproxy.com/https://git.openwrt.org#https://git.openwrt.org#g' feeds.conf.default
         
-        # 打印最终配置（便于日志排查）
+        # 打印最终配置
         echo "=== Final feeds.conf.default ==="
         cat feeds.conf.default
 
-    - name: Update and install feeds (GitHub原生+fastgit备用)
+    - name: Install feeds (绕过Git，直接下载解压)
       run: |
-        # 1. 强制清理旧feeds缓存和目录
+        # 1. 强制清理旧feeds
         ./scripts/feeds clean -a
         rm -rf ./feeds/* && mkdir -p ./feeds
         
-        # 2. 优先用原生地址更新feeds
-        ./scripts/feeds update -a -f || {
-          echo "⚠️ 原生地址更新失败，尝试手动克隆passwall"
-          # 方案1：GitHub原生地址克隆
-          git clone --depth=1 https://github.com/xiaorouji/openwrt-passwall.git ./feeds/passwall || {
-            echo "⚠️ 原生地址克隆失败，尝试fastgit镜像"
-            # 方案2：fastgit备用镜像（GitHub加速）
-            git clone --depth=1 https://hub.fastgit.xyz/xiaorouji/openwrt-passwall.git ./feeds/passwall || {
-              echo "❌ 所有地址均克隆失败，构建终止"
+        # 2. 仅更新官方feeds（跳过第三方）
+        ./scripts/feeds update -a -f || echo "⚠️ 官方feeds更新失败，继续构建"
+        
+        # 3. 核心：下载passwall压缩包（多镜像兜底）
+        echo "=== 下载passwall代码包 ==="
+        # 方案1：GitHub原生下载
+        wget -q -O passwall.tar.gz https://codeload.github.com/xiaorouji/openwrt-passwall/tar.gz/main || {
+          echo "⚠️ 方案1失败，尝试jsdelivr镜像"
+          # 方案2：jsdelivr镜像
+          wget -q -O passwall.tar.gz https://cdn.jsdelivr.net/gh/xiaorouji/openwrt-passwall@main.tar.gz || {
+            echo "⚠️ 方案2失败，尝试ghproxy镜像"
+            # 方案3：ghproxy镜像
+            wget -q -O passwall.tar.gz https://mirror.ghproxy.com/https://codeload.github.com/xiaorouji/openwrt-passwall/tar.gz/main || {
+              echo "❌ 所有下载方案均失败，构建终止"
               exit 1
             }
           }
         }
         
-        # 3. 强制安装所有feeds
+        # 4. 解压到feeds/passwall目录
+        echo "=== 解压passwall代码 ==="
+        tar -zxf passwall.tar.gz -C ./feeds/
+        # 处理解压后的目录名（兼容不同镜像的命名）
+        mv ./feeds/openwrt-passwall* ./feeds/passwall 2>/dev/null || true
+        
+        # 5. 清理压缩包
+        rm -f passwall.tar.gz
+        
+        # 6. 可选：下载rtp2httpd（替换为真实地址，无则注释）
+        # wget -q -O rtp2httpd.tar.gz https://codeload.github.com/xxx/rtp2httpd/tar.gz/main
+        # tar -zxf rtp2httpd.tar.gz -C ./feeds/
+        # mv ./feeds/rtp2httpd* ./feeds/rtp2httpd 2>/dev/null || true
+        # rm -f rtp2httpd.tar.gz
+        
+        # 7. 强制安装所有feeds
         ./scripts/feeds install -a -f
         
-        # 4. 单独确认passwall安装
-        ./scripts/feeds install passwall || true
-        
-        # 5. 终极目录验证（必须存在才继续）
+        # 8. 终极目录验证（必须存在）
         echo "=== 终极目录验证 ==="
         if [ ! -d "./feeds/passwall" ]; then
           echo "❌ passwall目录缺失，构建终止"
           exit 1
         else
           echo "✅ passwall目录存在"
-          # 打印目录内容，确认克隆成功
+          # 打印目录内容确认
           ls -la ./feeds/passwall | head -10
         fi
         
-        # rtp2httpd验证（无则注释）
-        # if [ ! -d "./feeds/rtp2httpd" ]; then
-        #   echo "⚠️ rtp2httpd目录缺失，尝试克隆"
-        #   git clone --depth=1 https://github.com/xxx/rtp2httpd.git ./feeds/rtp2httpd || echo "❌ rtp2httpd克隆失败"
-        # fi
-        
-        # 打印最终feeds目录结构
+        # 打印最终feeds结构
         echo "=== Feeds目录结构 ==="
         ls -la ./feeds/
 
     - name: Load custom config
       run: |
-        # 检查自定义配置，无则生成默认
         if [ -f .config ]; then
           cp .config .config.bak
           echo "ℹ️ 使用已有.config配置"
@@ -118,9 +128,9 @@ jobs:
 
     - name: Compile firmware
       run: |
-        # 多线程编译失败则单线程输出详细日志（便于排查）
+        # 多线程失败则单线程输出详细日志
         make -j$(nproc) || {
-          echo "❌ 多线程编译失败，单线程重试并输出详细日志"
+          echo "❌ 多线程编译失败，单线程重试"
           make -j1 V=s
         }
 
@@ -129,7 +139,7 @@ jobs:
       with:
         name: MT3000-firmware-${{ github.run_number }}
         path: bin/targets/**
-        retention-days: 7  # 产物保留7天，避免占用空间
+        retention-days: 7
 
     - name: Upload to Releases
       uses: softprops/action-gh-release@v2
